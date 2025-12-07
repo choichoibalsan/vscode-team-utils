@@ -1,83 +1,75 @@
 "use strict";
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.activate = activate;
-exports.deactivate = deactivate;
-const vscode = __importStar(require("vscode"));
-
+const vscode = require("vscode");
 function activate(context) {
-    /* ★コマンドIDを inspector.open に変更 */
+    // 1. サイドバーの「箱」を作る (ID: inspector.view)
+    const provider = new InspectorViewProvider(context.extensionUri);
+    context.subscriptions.push(vscode.window.registerWebviewViewProvider('inspector.view', provider));
+    // 2. コマンドで「データ」を流し込む (ID: inspector.open)
     let disposable = vscode.commands.registerCommand('inspector.open', () => {
         const editor = vscode.window.activeTextEditor;
         if (!editor) {
-            vscode.window.showErrorMessage('No active file.');
+            vscode.window.showErrorMessage('ソースファイルを開いてから実行してください');
             return;
         }
         const text = editor.document.getText();
         const fenList = text.split(/\r?\n/).filter(line => line.trim().length > 0);
         if (fenList.length === 0) {
-            vscode.window.showErrorMessage('No data found.');
+            vscode.window.showErrorMessage('データが見つかりません');
             return;
         }
-        /* ★パネル名を Inspector に変更 */
-        const panel = vscode.window.createWebviewPanel('inspector', 'Inspector', vscode.ViewColumn.Two, { enableScripts: true });
-        panel.webview.html = getWebviewContent(fenList);
+        // プロバイダー経由でデータを渡して再生開始
+        provider.startInspection(fenList);
     });
     context.subscriptions.push(disposable);
 }
-
-function getWebviewContent(fenList) {
-    const fenJson = JSON.stringify(fenList);
-    return `<!DOCTYPE html>
+class InspectorViewProvider {
+    constructor(_extensionUri) {
+        this._extensionUri = _extensionUri;
+    }
+    resolveWebviewView(webviewView, context, _token) {
+        this._view = webviewView;
+        webviewView.webview.options = {
+            enableScripts: true,
+        };
+        // 初期状態は待機画面
+        webviewView.webview.html = this._getHtmlForWebview([]);
+    }
+    // 外部からデータを渡されて再生を開始するメソッド
+    startInspection(fenList) {
+        if (this._view) {
+            this._view.webview.html = this._getHtmlForWebview(fenList);
+        }
+    }
+    _getHtmlForWebview(fenList) {
+        // データがない場合は「待機中」表示
+        if (fenList.length === 0) {
+            return `<!DOCTYPE html>
+            <html lang="en">
+            <body style="background-color: transparent; color: #555; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; font-family: sans-serif;">
+                <div style="font-size: 12px; opacity: 0.5;">No active inspections</div>
+            </body>
+            </html>`;
+        }
+        const fenJson = JSON.stringify(fenList);
+        // ステルスチェス盤（サイドバー用）
+        return `<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <style>
         body { 
-            /* 背景色をVS Codeに完全同期 */
-            background-color: var(--vscode-editor-background);
+            background-color: transparent;
             color: var(--vscode-editor-foreground);
             display: flex; 
             flex-direction: column; 
             align-items: center; 
-            justify-content: center; 
-            height: 100vh; 
             margin: 0;
+            padding-top: 20px;
             font-family: 'Consolas', 'Courier New', monospace;
             overflow: hidden;
-            opacity: 0.6; /* 全体を少し薄くしてコメントアウトっぽく */
+            opacity: 0.8;
         }
         
         #board {
@@ -85,10 +77,9 @@ function getWebviewContent(fenList) {
             grid-template-columns: repeat(8, 1fr);
             grid-template-rows: repeat(8, 1fr);
             border: none;
-            width: 90vmin;
-            height: 90vmin;
-            max-width: 600px;
-            max-height: 600px;
+            width: 90%; 
+            aspect-ratio: 1 / 1; 
+            max-width: 300px;
         }
 
         .cell {
@@ -97,71 +88,40 @@ function getWebviewContent(fenList) {
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: calc(90vmin / 10); 
+            font-size: 14px; 
             font-weight: normal;
             box-sizing: border-box;
             overflow: hidden;
         }
+        
+        @media (min-width: 200px) { .cell { font-size: 18px; } }
+        @media (min-width: 300px) { .cell { font-size: 24px; } }
 
-        @media (min-width: 600px) and (min-height: 600px) {
-            .cell {
-                font-size: 40px;
-            }
-        }
-
-        /* 背景色は透明 */
         .white-cell { background-color: transparent; }
-        /* 黒マスはうっすら色付け */
-        .black-cell { background-color: rgba(255, 255, 255, 0.04); } 
+        .black-cell { background-color: rgba(128, 128, 128, 0.1); } 
         
         .piece { cursor: default; }
-
-        .black-piece {
-            transform: rotate(180deg);
-            display: inline-block;
-            color: inherit; 
-            font-weight: bold;
-            opacity: 0.7;
-            text-shadow: 0 0 1px currentColor;
-        }
-
-        .white-piece {
-            color: inherit;
-            font-weight: bold;
-            text-shadow: none;
-            opacity: 1.0;
-        }
+        .black-piece { transform: rotate(180deg); display: inline-block; opacity: 0.7; font-weight: bold; }
+        .white-piece { opacity: 1.0; font-weight: bold; }
     </style>
 </head>
 <body>
     <div id="board"></div>
-
     <script>
         const fenList = ${fenJson};
         let currentIndex = 0;
         const boardEl = document.getElementById('board');
-
-        const pieceMap = {
-            'P': '○', 'N': 'N', 'B': 'B', 'R': 'L', 'Q': 'Q', 'K': 'K',
-            'p': '●', 'n': 'N', 'b': 'B', 'r': 'L', 'q': 'Q', 'k': 'K'
-        };
+        const pieceMap = { 'P': '○', 'N': 'N', 'B': 'B', 'R': 'L', 'Q': 'Q', 'K': 'K', 'p': '●', 'n': 'N', 'b': 'B', 'r': 'L', 'q': 'Q', 'k': 'K' };
 
         function createCell(row, col, content = '') {
-            const cellIndex = row * 8 + col;
             const isBlackCell = (row + col) % 2 === 1;
             const cell = document.createElement('div');
             cell.className = 'cell ' + (isBlackCell ? 'black-cell' : 'white-cell');
-            
             if (content) {
                 const span = document.createElement('span');
                 span.className = 'piece';
-                
-                if (content === content.toLowerCase()) {
-                     span.classList.add('black-piece');
-                } else {
-                     span.classList.add('white-piece');
-                }
-
+                if (content === content.toLowerCase()) span.classList.add('black-piece');
+                else span.classList.add('white-piece');
                 span.textContent = pieceMap[content] || content;
                 cell.appendChild(span);
             }
@@ -171,29 +131,21 @@ function getWebviewContent(fenList) {
         function drawBoard(fen) {
             boardEl.innerHTML = '';
             const placement = fen.split(' ')[0];
-            let row = 0;
-            let col = 0;
-
+            let row = 0; let col = 0;
             for (let char of placement) {
-                if (char === '/') {
-                    row++;
-                    col = 0;
-                } else if (/[0-9]/.test(char)) { /* ★ここを修正！数字を確実に認識させる */
+                if (char === '/') { row++; col = 0; }
+                else if (/[0-9]/.test(char)) {
                     const count = parseInt(char);
-                    for (let i = 0; i < count; i++) {
-                        boardEl.appendChild(createCell(row, col, ''));
-                        col++;
-                    }
+                    for (let i = 0; i < count; i++) { boardEl.appendChild(createCell(row, col, '')); col++; }
                 } else {
-                    boardEl.appendChild(createCell(row, col, char));
-                    col++;
+                    boardEl.appendChild(createCell(row, col, char)); col++;
                 }
             }
         }
 
         function update() {
             if (currentIndex >= fenList.length) {
-                currentIndex = 0;
+                currentIndex = 0; // ループ
             }
             const currentFen = fenList[currentIndex];
             drawBoard(currentFen);
@@ -201,9 +153,10 @@ function getWebviewContent(fenList) {
         }
 
         update();
-        setInterval(update, 60000); 
+        setInterval(update, 60000); // 1分ごとに更新
     </script>
 </body>
 </html>`;
+    }
 }
-function deactivate() { }
+//# sourceMappingURL=extension.js.map
