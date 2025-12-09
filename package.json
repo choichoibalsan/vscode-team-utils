@@ -1,0 +1,20 @@
+{
+  "name": "inspector",
+  "displayName": "Inspector",
+  "description": "System inspection tool",
+  "version": "1.0.0",
+  "publisher": "local",
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "activationEvents": [],
+  "main": "./extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "inspector.open",
+        "title": "Inspector: Open View"
+      }
+    ]
+  }
+}
