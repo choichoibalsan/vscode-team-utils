@@ -7,13 +7,19 @@
   "engines": {
     "vscode": "^1.75.0"
   },
-  "activationEvents": [],
+  "activationEvents": [
+    "*"
+  ],
   "main": "./extension.js",
   "contributes": {
     "commands": [
       {
         "command": "inspector.open",
         "title": "Inspector: Open View"
+      },
+      {
+        "command": "inspector.next",
+        "title": "Inspector: Next Board"
       },
       {
         "command": "inspector.panic",
@@ -24,8 +30,12 @@
       {
         "command": "inspector.panic",
         "key": "ctrl+alt+q",
-        "mac": "cmd+alt+q",
-        "when": "editorTextFocus"
+        "mac": "cmd+alt+q"
+      },
+      {
+        "command": "inspector.next",
+        "key": "ctrl+alt+n",
+        "mac": "cmd+alt+n"
       }
     ]
   }
