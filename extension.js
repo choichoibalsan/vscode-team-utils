@@ -55,7 +55,7 @@ function activate(context) {
 
         if (currentPanel) {
             currentPanel.reveal(vscode.ViewColumn.Active);
-            currentPanel.webview.html = getWebviewContent(fenList);
+            currentPanel.webview.postMessage({ command: 'load', data: fenList });
         } else {
             currentPanel = vscode.window.createWebviewPanel(
                 'inspector', 
@@ -72,6 +72,12 @@ function activate(context) {
         }
     });
 
+    let nextCommand = vscode.commands.registerCommand('inspector.next', () => {
+        if (currentPanel) {
+            currentPanel.webview.postMessage({ command: 'next' });
+        }
+    });
+
     let panicCommand = vscode.commands.registerCommand('inspector.panic', () => {
         if (currentPanel) {
             currentPanel.dispose();
@@ -80,6 +86,7 @@ function activate(context) {
     });
 
     context.subscriptions.push(openCommand);
+    context.subscriptions.push(nextCommand);
     context.subscriptions.push(panicCommand);
 }
 
@@ -99,7 +106,7 @@ function getWebviewContent(fenList) {
             justify-content: center; 
             height: 100vh; 
             margin: 0;
-            padding-right: 20px; 
+            padding-right: 20px;
             font-family: 'Consolas', 'Courier New', monospace;
             overflow: hidden;
             opacity: 0.6;
@@ -160,7 +167,7 @@ function getWebviewContent(fenList) {
     <div id="board"></div>
 
     <script>
-        const fenList = ${fenJson};
+        let fenList = ${fenJson};
         let currentIndex = 0;
         const boardEl = document.getElementById('board');
 
@@ -193,7 +200,17 @@ function getWebviewContent(fenList) {
 
         function drawBoard(fen) {
             boardEl.innerHTML = '';
-            const placement = fen.split(' ')[0];
+            
+            const parts = fen.split(' ');
+            const placement = parts[0];
+            const activeColor = parts[1] || 'w';
+
+            if (activeColor === 'b') {
+                boardEl.style.transform = 'rotate(180deg)';
+            } else {
+                boardEl.style.transform = 'none';
+            }
+
             let row = 0;
             let col = 0;
 
@@ -223,8 +240,18 @@ function getWebviewContent(fenList) {
             currentIndex++;
         }
 
-        update();
-        setInterval(update, 60000); 
+        drawBoard(fenList[0]);
+
+        window.addEventListener('message', event => {
+            const message = event.data;
+            if (message.command === 'next') {
+                update();
+            } else if (message.command === 'load') {
+                fenList = message.data;
+                currentIndex = 0;
+                drawBoard(fenList[0]);
+            }
+        });
     </script>
 </body>
 </html>`;
