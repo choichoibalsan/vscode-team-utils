@@ -37,8 +37,10 @@ exports.activate = activate;
 exports.deactivate = deactivate;
 const vscode = __importStar(require("vscode"));
 
+let currentPanel = undefined;
+
 function activate(context) {
-    let disposable = vscode.commands.registerCommand('inspector.open', () => {
+    let openCommand = vscode.commands.registerCommand('inspector.open', () => {
         const editor = vscode.window.activeTextEditor;
         if (!editor) {
             vscode.window.showErrorMessage('No active file.');
@@ -50,10 +52,35 @@ function activate(context) {
             vscode.window.showErrorMessage('No data found.');
             return;
         }
-        const panel = vscode.window.createWebviewPanel('inspector', 'Inspector', vscode.ViewColumn.Two, { enableScripts: true });
-        panel.webview.html = getWebviewContent(fenList);
+
+        if (currentPanel) {
+            currentPanel.reveal(vscode.ViewColumn.Active);
+            currentPanel.webview.html = getWebviewContent(fenList);
+        } else {
+            currentPanel = vscode.window.createWebviewPanel(
+                'inspector', 
+                'Inspector', 
+                vscode.ViewColumn.Active, 
+                { enableScripts: true }
+            );
+
+            currentPanel.onDidDispose(() => {
+                currentPanel = undefined;
+            }, null, context.subscriptions);
+
+            currentPanel.webview.html = getWebviewContent(fenList);
+        }
     });
-    context.subscriptions.push(disposable);
+
+    let panicCommand = vscode.commands.registerCommand('inspector.panic', () => {
+        if (currentPanel) {
+            currentPanel.dispose();
+            currentPanel = undefined;
+        }
+    });
+
+    context.subscriptions.push(openCommand);
+    context.subscriptions.push(panicCommand);
 }
 
 function getWebviewContent(fenList) {
@@ -68,10 +95,11 @@ function getWebviewContent(fenList) {
             color: var(--vscode-editor-foreground);
             display: flex; 
             flex-direction: column; 
-            align-items: center; 
+            align-items: flex-end; 
             justify-content: center; 
             height: 100vh; 
             margin: 0;
+            padding-right: 20px; 
             font-family: 'Consolas', 'Courier New', monospace;
             overflow: hidden;
             opacity: 0.6;
