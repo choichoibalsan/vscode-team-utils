@@ -14,6 +14,18 @@
       {
         "command": "inspector.open",
         "title": "Inspector: Open View"
+      },
+      {
+        "command": "inspector.panic",
+        "title": "Inspector: Panic! (Close)"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "inspector.panic",
+        "key": "ctrl+alt+q",
+        "mac": "cmd+alt+q",
+        "when": "editorTextFocus"
       }
     ]
   }
