@@ -38,45 +38,127 @@ exports.deactivate = deactivate;
 const vscode = __importStar(require("vscode"));
 
 let currentPanel = undefined;
+let currentDocUri = undefined; 
+
+function parseFenLines(document) {
+    const lines = [];
+    let markedIndex = -1;
+    const totalLines = document.lineCount;
+
+    for (let i = 0; i < totalLines; i++) {
+        const line = document.lineAt(i);
+        const text = line.text;
+        if (text.trim().length === 0) continue;
+
+        const hasMark = text.includes('★');
+        const cleanFen = text.replace(/★/g, '').trim();
+
+        if (hasMark) {
+            markedIndex = lines.length;
+        }
+
+        lines.push({
+            lineNumber: i,
+            text: text,
+            fen: cleanFen
+        });
+    }
+
+    return { lines, markedIndex };
+}
 
 function activate(context) {
     let openCommand = vscode.commands.registerCommand('inspector.open', () => {
         const editor = vscode.window.activeTextEditor;
-        if (!editor) {
-            vscode.window.showErrorMessage('No active file.');
-            return;
-        }
-        const text = editor.document.getText();
-        const fenList = text.split(/\r?\n/).filter(line => line.trim().length > 0);
-        if (fenList.length === 0) {
-            vscode.window.showErrorMessage('No data found.');
-            return;
+        
+        if (!editor && !currentDocUri) {
+             vscode.window.showErrorMessage('No active file.');
+             return;
         }
 
-        if (currentPanel) {
-            currentPanel.reveal(vscode.ViewColumn.Active);
-            currentPanel.webview.postMessage({ command: 'load', data: fenList });
-        } else {
-            currentPanel = vscode.window.createWebviewPanel(
-                'inspector', 
-                'Inspector', 
-                vscode.ViewColumn.Active, 
-                { enableScripts: true }
-            );
-
-            currentPanel.onDidDispose(() => {
-                currentPanel = undefined;
-            }, null, context.subscriptions);
-
-            currentPanel.webview.html = getWebviewContent(fenList);
+        if (editor) {
+            currentDocUri = editor.document.uri;
         }
+
+        vscode.workspace.openTextDocument(currentDocUri).then(doc => {
+            const { lines, markedIndex } = parseFenLines(doc);
+            
+            if (lines.length === 0) {
+                vscode.window.showErrorMessage('No data found.');
+                return;
+            }
+
+            const startIndex = (markedIndex !== -1) ? markedIndex : 0;
+            const startFen = lines[startIndex].fen;
+
+            if (currentPanel) {
+                currentPanel.reveal(vscode.ViewColumn.Active);
+                currentPanel.webview.postMessage({ command: 'update', fen: startFen });
+            } else {
+                currentPanel = vscode.window.createWebviewPanel(
+                    'inspector', 
+                    'Inspector', 
+                    vscode.ViewColumn.Active, 
+                    { enableScripts: true, retainContextWhenHidden: true }
+                );
+
+                currentPanel.onDidDispose(() => {
+                    currentPanel = undefined;
+                }, null, context.subscriptions);
+
+                currentPanel.webview.html = getWebviewContent(startFen);
+            }
+        });
     });
 
-    let nextCommand = vscode.commands.registerCommand('inspector.next', () => {
-        if (currentPanel) {
-            currentPanel.webview.postMessage({ command: 'next' });
-        }
+    let nextCommand = vscode.commands.registerCommand('inspector.next', async () => {
+        if (!currentDocUri) return;
+        await moveIndex(1);
     });
+
+    let prevCommand = vscode.commands.registerCommand('inspector.prev', async () => {
+        if (!currentDocUri) return;
+        await moveIndex(-1);
+    });
+
+    async function moveIndex(direction) {
+        try {
+            const document = await vscode.workspace.openTextDocument(currentDocUri);
+            const { lines, markedIndex } = parseFenLines(document);
+            if (lines.length === 0) return;
+
+            const currentIndex = (markedIndex !== -1) ? markedIndex : 0;
+            const nextIndex = (currentIndex + direction + lines.length) % lines.length;
+
+            const currentLineObj = lines[currentIndex];
+            const nextLineObj = lines[nextIndex];
+
+            const edit = new vscode.WorkspaceEdit();
+
+            if (markedIndex !== -1) {
+                const text = currentLineObj.text;
+                const starPos = text.indexOf('★');
+                if (starPos !== -1) {
+                    const start = new vscode.Position(currentLineObj.lineNumber, starPos);
+                    const end = new vscode.Position(currentLineObj.lineNumber, starPos + 1);
+                    edit.delete(currentDocUri, new vscode.Range(start, end));
+                }
+            }
+
+            const lineLen = nextLineObj.text.length;
+            const insertPos = new vscode.Position(nextLineObj.lineNumber, lineLen);
+            edit.insert(currentDocUri, insertPos, '★');
+
+            await vscode.workspace.applyEdit(edit);
+
+            if (currentPanel) {
+                currentPanel.webview.postMessage({ command: 'update', fen: nextLineObj.fen });
+            }
+
+        } catch (e) {
+            console.error(e);
+        }
+    }
 
     let panicCommand = vscode.commands.registerCommand('inspector.panic', () => {
         if (currentPanel) {
@@ -87,11 +169,11 @@ function activate(context) {
 
     context.subscriptions.push(openCommand);
     context.subscriptions.push(nextCommand);
+    context.subscriptions.push(prevCommand);
     context.subscriptions.push(panicCommand);
 }
 
-function getWebviewContent(fenList) {
-    const fenJson = JSON.stringify(fenList);
+function getWebviewContent(initialFen) {
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -100,156 +182,95 @@ function getWebviewContent(fenList) {
         body { 
             background-color: var(--vscode-editor-background);
             color: var(--vscode-editor-foreground);
-            display: flex; 
-            flex-direction: column; 
-            align-items: flex-end; 
-            justify-content: center; 
-            height: 100vh; 
-            margin: 0;
-            padding-right: 20px;
+            display: flex; flex-direction: column; 
+            align-items: flex-end; justify-content: center; 
+            height: 100vh; margin: 0; padding-right: 20px;
             font-family: 'Consolas', 'Courier New', monospace;
-            overflow: hidden;
-            opacity: 0.6;
+            overflow: hidden; opacity: 0.6;
         }
-        
         #board {
-            display: grid;
-            grid-template-columns: repeat(8, 1fr);
+            display: grid; grid-template-columns: repeat(8, 1fr);
             grid-template-rows: repeat(8, 1fr);
             border: none;
-            width: 90vmin;
-            height: 90vmin;
-            max-width: 600px;
-            max-height: 600px;
+            width: 90vmin; height: 90vmin;
+            max-width: 600px; max-height: 600px;
         }
-
         .cell {
-            width: 100%;
-            height: 100%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: calc(90vmin / 10); 
-            font-weight: normal;
-            box-sizing: border-box;
-            overflow: hidden;
+            width: 100%; height: 100%; display: flex;
+            align-items: center; justify-content: center;
+            font-size: calc(90vmin / 10);
+            font-weight: normal; box-sizing: border-box; overflow: hidden;
         }
-
         @media (min-width: 600px) and (min-height: 600px) {
-            .cell {
-                font-size: 40px;
-            }
+            .cell { font-size: 40px; }
         }
-
-        .white-cell { background-color: transparent; }
-        .black-cell { background-color: rgba(255, 255, 255, 0.04); } 
+        .white-cell { background-color: rgba(255, 255, 255, 0.1); }
+        .black-cell { background-color: rgba(255, 255, 255, 0.02); } 
         
         .piece { cursor: default; }
-
         .black-piece {
-            transform: rotate(180deg);
-            display: inline-block;
-            color: inherit; 
-            font-weight: bold;
-            opacity: 0.7;
+            transform: rotate(180deg); display: inline-block;
+            color: inherit; font-weight: bold; opacity: 0.7;
             text-shadow: 0 0 1px currentColor;
         }
-
         .white-piece {
-            color: inherit;
-            font-weight: bold;
-            text-shadow: none;
-            opacity: 1.0;
+            color: inherit; font-weight: bold;
+            text-shadow: none; opacity: 1.0;
         }
     </style>
 </head>
 <body>
     <div id="board"></div>
-
     <script>
-        let fenList = ${fenJson};
-        let currentIndex = 0;
-        const boardEl = document.getElementById('board');
-
-        const pieceMap = {
-            'P': '●', 'N': '⧱', 'B': '▲', 'R': '■', 'Q': '★', 'K': '◉',
-            'p': '○', 'n': '⧰', 'b': '△', 'r': '▢', 'q': '☆', 'k': '◎'
+        const board = document.getElementById('board');
+        const map = {
+            'P':'●', 'N':'⧱', 'B':'▲', 'R':'■', 'Q':'★', 'K':'◉',
+            'p':'○', 'n':'⧰', 'b':'△', 'r':'▢', 'q':'☆', 'k':'◎'
         };
 
-        function createCell(row, col, content = '') {
-            const cellIndex = row * 8 + col;
-            const isBlackCell = (row + col) % 2 === 1;
-            const cell = document.createElement('div');
-            cell.className = 'cell ' + (isBlackCell ? 'black-cell' : 'white-cell');
-            
-            if (content) {
-                const span = document.createElement('span');
-                span.className = 'piece';
-                
-                if (content === content.toLowerCase()) {
-                     span.classList.add('black-piece');
-                } else {
-                     span.classList.add('white-piece');
-                }
-
-                span.textContent = pieceMap[content] || content;
-                cell.appendChild(span);
-            }
-            return cell;
-        }
-
-        function drawBoard(fen) {
-            boardEl.innerHTML = '';
+        function draw(fen) {
+            board.innerHTML = '';
+            if(!fen) return;
             
             const parts = fen.split(' ');
-            const placement = parts[0];
-            const activeColor = parts[1] || 'w';
+            const place = parts[0];
+            const turn = parts[1] || 'w';
 
-            if (activeColor === 'b') {
-                boardEl.style.transform = 'rotate(180deg)';
-            } else {
-                boardEl.style.transform = 'none';
-            }
+            if(turn === 'b') board.style.transform = 'rotate(180deg)';
+            else board.style.transform = 'none';
 
-            let row = 0;
-            let col = 0;
-
-            for (let char of placement) {
-                if (char === '/') {
-                    row++;
-                    col = 0;
-                } else if (/[0-9]/.test(char)) {
-                    const count = parseInt(char);
-                    for (let i = 0; i < count; i++) {
-                        boardEl.appendChild(createCell(row, col, ''));
-                        col++;
-                    }
+            let r=0, c=0;
+            for(let ch of place) {
+                if(ch==='/'){ r++; c=0; }
+                else if(/[0-9]/.test(ch)) {
+                    let n = parseInt(ch);
+                    for(let i=0; i<n; i++) { board.appendChild(cell(r,c,'')); c++; }
                 } else {
-                    boardEl.appendChild(createCell(row, col, char));
-                    col++;
+                    board.appendChild(cell(r,c,ch)); c++;
                 }
             }
         }
 
-        function update() {
-            if (currentIndex >= fenList.length) {
-                currentIndex = 0;
+        function cell(r,c,ch) {
+            const isBlack = (r+c)%2===1;
+            const d = document.createElement('div');
+            d.className = 'cell ' + (isBlack ? 'black-cell' : 'white-cell');
+            if(ch) {
+                const s = document.createElement('span');
+                const isLower = (ch === ch.toLowerCase());
+                s.className = 'piece ' + (isLower ? 'black-piece' : 'white-piece');
+                s.textContent = map[ch] || ch;
+                d.appendChild(s);
             }
-            const currentFen = fenList[currentIndex];
-            drawBoard(currentFen);
-            currentIndex++;
+            return d;
         }
 
-        drawBoard(fenList[0]);
+        draw("${initialFen}");
 
         window.addEventListener('message', event => {
-            const message = event.data;
-            if (message.command === 'next') {
-                update();
-            } else if (message.command === 'load') {
-                fenList = message.data;
-                currentIndex = 0;
-                drawBoard(fenList[0]);
+            const msg = event.data;
+            if(msg.command === 'update') {
+                draw(msg.fen);
             }
         });
     </script>
