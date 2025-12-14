@@ -22,6 +22,10 @@
         "title": "Inspector: Next Board"
       },
       {
+        "command": "inspector.prev",
+        "title": "Inspector: Previous Board"
+      },
+      {
         "command": "inspector.panic",
         "title": "Inspector: Panic! (Close)"
       }
@@ -36,6 +40,11 @@
         "command": "inspector.next",
         "key": "ctrl+alt+n",
         "mac": "cmd+alt+n"
+      },
+      {
+        "command": "inspector.prev",
+        "key": "ctrl+alt+p",
+        "mac": "cmd+alt+p"
       }
     ]
   }
